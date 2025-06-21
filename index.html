@@ -83,6 +83,7 @@
     const webhookUrl = "https://hook.integrator.boost.space/cu6cbygs0e453tno275nt1x6u9ucmxsl";
     let html5QrCode;
     let lastScanned = null;
+    let eventSource = null;
 
     function showScreen(id) {
       document.getElementById("scan-screen").classList.add("hidden");
@@ -94,6 +95,13 @@
     function restart() {
       lastScanned = null;
       showScreen("scan-screen");
+
+      // בטיחות: סגור חיבור קודם אם קיים
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+
       html5QrCode.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 250 },
@@ -102,37 +110,50 @@
     }
 
     function onScanSuccess(decodedText) {
-      if (decodedText === lastScanned) return; // אל תסרוק שוב את אותו ברקוד
+      if (decodedText === lastScanned) return;
       lastScanned = decodedText;
       html5QrCode.stop();
       showScreen("loading-screen");
 
-      // שלח לוובהוק
+      // שלח רק פעם אחת
       fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: decodedText })
       })
-      .then(() => waitForSuccess(decodedText))
+      .then(async response => {
+        if (response.status === 200) {
+          // אחרי 200 מחכה לפולינג 202
+          waitForStatus202();
+        } else {
+          alert("Ошибка при первом ответе сервера.");
+          restart();
+        }
+      })
       .catch(() => {
-        alert("Произошла ошибка при отправке данных.");
+        alert("Ошибка при подключении к серверу.");
         restart();
       });
     }
 
-    async function waitForSuccess(key) {
-      const maxAttempts = 20;
+    async function waitForStatus202() {
+      const maxAttempts = 30;
       let attempts = 0;
       while (attempts < maxAttempts) {
         await new Promise(r => setTimeout(r, 1500));
-        const res = await fetch(webhookUrl + "?key=" + encodeURIComponent(key));
-        if (res.status === 202) {
-          showScreen("success-screen");
-          return;
+        try {
+          const res = await fetch(webhookUrl, { method: "GET" });
+          if (res.status === 202) {
+            showScreen("success-screen");
+            return;
+          }
+        } catch (e) {
+          console.warn("Ошибка при ожидании 202");
         }
         attempts++;
       }
-      alert("Время ожидания истекло. Попробуйте снова.");
+
+      alert("Ответ 202 не получен. Повторите попытку.");
       restart();
     }
 
