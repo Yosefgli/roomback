@@ -83,7 +83,6 @@
     const webhookUrl = "https://hook.integrator.boost.space/cu6cbygs0e453tno275nt1x6u9ucmxsl";
     let html5QrCode;
     let lastScanned = null;
-    let eventSource = null;
 
     function showScreen(id) {
       document.getElementById("scan-screen").classList.add("hidden");
@@ -95,12 +94,6 @@
     function restart() {
       lastScanned = null;
       showScreen("scan-screen");
-
-      // בטיחות: סגור חיבור קודם אם קיים
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
 
       html5QrCode.start(
         { facingMode: "environment" },
@@ -115,46 +108,41 @@
       html5QrCode.stop();
       showScreen("loading-screen");
 
-      // שלח רק פעם אחת
+      // נשלח רק פעם אחת
       fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: decodedText })
-      })
-      .then(async response => {
+      }).then(response => {
         if (response.status === 200) {
-          // אחרי 200 מחכה לפולינג 202
-          waitForStatus202();
+          listenFor202(decodedText);
         } else {
           alert("Ошибка при первом ответе сервера.");
           restart();
         }
-      })
-      .catch(() => {
-        alert("Ошибка при подключении к серверу.");
+      }).catch(() => {
+        alert("Ошибка соединения с сервером.");
         restart();
       });
     }
 
-    async function waitForStatus202() {
-      const maxAttempts = 30;
-      let attempts = 0;
-      while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const res = await fetch(webhookUrl, { method: "GET" });
-          if (res.status === 202) {
-            showScreen("success-screen");
-            return;
-          }
-        } catch (e) {
-          console.warn("Ошибка при ожидании 202");
-        }
-        attempts++;
-      }
+    function listenFor202(key) {
+      const sseUrl = webhookUrl + "?key=" + encodeURIComponent(key); // או URL ייעודי אם יש
+      const source = new EventSource(sseUrl);
 
-      alert("Ответ 202 не получен. Повторите попытку.");
-      restart();
+      source.onmessage = (event) => {
+        const data = event.data;
+        if (data === "202") {
+          source.close();
+          showScreen("success-screen");
+        }
+      };
+
+      source.onerror = () => {
+        source.close();
+        alert("Ошибка получения обновления. Повторите попытку.");
+        restart();
+      };
     }
 
     window.onload = () => {
