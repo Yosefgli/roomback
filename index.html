@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Возврат ключа</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Arial', sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #app {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 0 16px rgba(0,0,0,0.2);
+      padding: 32px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    #qr-reader {
+      width: 100%;
+      margin: auto;
+    }
+    .loading, .success {
+      font-size: 20px;
+      margin-top: 20px;
+    }
+    .spinner {
+      margin: 20px auto;
+      width: 40px;
+      height: 40px;
+      border: 4px solid #ccc;
+      border-top: 4px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .hidden { display: none; }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="scan-screen">
+      <h1>Отсканируйте штрихкод ключа</h1>
+      <div id="qr-reader"></div>
+    </div>
+
+    <div id="loading-screen" class="hidden">
+      <div class="spinner"></div>
+      <div class="loading">Проверка возврата ключа...</div>
+    </div>
+
+    <div id="success-screen" class="hidden">
+      <div class="success">✅ Ключ успешно возвращён!</div>
+      <button onclick="restart()">Назад</button>
+    </div>
+  </div>
+
+  <script>
+    const webhookUrl = "https://hook.integrator.boost.space/cu6cbygs0e453tno275nt1x6u9ucmxsl";
+    let html5QrCode;
+    let lastScanned = null;
+
+    function showScreen(id) {
+      document.getElementById("scan-screen").classList.add("hidden");
+      document.getElementById("loading-screen").classList.add("hidden");
+      document.getElementById("success-screen").classList.add("hidden");
+      document.getElementById(id).classList.remove("hidden");
+    }
+
+    function restart() {
+      lastScanned = null;
+      showScreen("scan-screen");
+      html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess
+      );
+    }
+
+    function onScanSuccess(decodedText) {
+      if (decodedText === lastScanned) return; // אל תסרוק שוב את אותו ברקוד
+      lastScanned = decodedText;
+      html5QrCode.stop();
+      showScreen("loading-screen");
+
+      // שלח לוובהוק
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: decodedText })
+      })
+      .then(() => waitForSuccess(decodedText))
+      .catch(() => {
+        alert("Произошла ошибка при отправке данных.");
+        restart();
+      });
+    }
+
+    async function waitForSuccess(key) {
+      const maxAttempts = 20;
+      let attempts = 0;
+      while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 1500));
+        const res = await fetch(webhookUrl + "?key=" + encodeURIComponent(key));
+        if (res.status === 202) {
+          showScreen("success-screen");
+          return;
+        }
+        attempts++;
+      }
+      alert("Время ожидания истекло. Попробуйте снова.");
+      restart();
+    }
+
+    window.onload = () => {
+      html5QrCode = new Html5Qrcode("qr-reader");
+      restart();
+    };
+  </script>
+</body>
+</html>
