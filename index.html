@@ -32,8 +32,8 @@
       width: 100%;
       margin: auto;
     }
-    .loading, .success {
-      font-size: 20px;
+    .loading, .success, .error {
+      font-size: 18px;
       margin-top: 20px;
     }
     .spinner {
@@ -59,6 +59,11 @@
       font-size: 16px;
       cursor: pointer;
     }
+    #error-box {
+      color: red;
+      font-weight: bold;
+      margin-top: 15px;
+    }
   </style>
 </head>
 <body>
@@ -70,17 +75,23 @@
 
     <div id="loading-screen" class="hidden">
       <div class="spinner"></div>
-      <div class="loading">Проверка возврата ключа...</div>
+      <div class="loading">Пожалуйста, подождите... Обработка запроса</div>
     </div>
 
     <div id="success-screen" class="hidden">
       <div class="success">✅ Ключ успешно возвращён!</div>
       <button onclick="restart()">Назад</button>
     </div>
+
+    <div id="error-screen" class="hidden">
+      <div class="error">❌ Произошла ошибка</div>
+      <div id="error-box"></div>
+      <button onclick="restart()">Назад</button>
+    </div>
   </div>
 
   <script>
-    const webhookUrl = "https://hook.integrator.boost.space/cu6cbygs0e453tno275nt1x6u9ucmxsl";
+    const webhookURL = "https://hook.integrator.boost.space/cu6cbygs0e453tno275nt1x6u9ucmxsl";
     let html5QrCode;
     let lastScanned = null;
 
@@ -88,11 +99,13 @@
       document.getElementById("scan-screen").classList.add("hidden");
       document.getElementById("loading-screen").classList.add("hidden");
       document.getElementById("success-screen").classList.add("hidden");
+      document.getElementById("error-screen").classList.add("hidden");
       document.getElementById(id).classList.remove("hidden");
     }
 
     function restart() {
       lastScanned = null;
+      document.getElementById("error-box").innerText = '';
       showScreen("scan-screen");
 
       html5QrCode.start(
@@ -108,41 +121,30 @@
       html5QrCode.stop();
       showScreen("loading-screen");
 
-      // נשלח רק פעם אחת
-      fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: decodedText })
-      }).then(response => {
-        if (response.status === 200) {
-          listenFor202(decodedText);
-        } else {
-          alert("Ошибка при первом ответе сервера.");
-          restart();
-        }
-      }).catch(() => {
-        alert("Ошибка соединения с сервером.");
-        restart();
-      });
+      sendWebhook({ key: decodedText },
+        () => { showScreen("error-screen"); },
+        () => { showScreen("success-screen"); }
+      );
     }
 
-    function listenFor202(key) {
-      const sseUrl = webhookUrl + "?key=" + encodeURIComponent(key); // או URL ייעודי אם יש
-      const source = new EventSource(sseUrl);
+    function sendWebhook(data, onFail = () => {}, onSuccess = () => {}) {
+      fetch(webhookURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      }).then(async res => {
+        const headers = {};
+        res.headers.forEach((v, k) => headers[k.toLowerCase()] = v);
 
-      source.onmessage = (event) => {
-        const data = event.data;
-        if (data === "202") {
-          source.close();
-          showScreen("success-screen");
+        if (res.status === 202 && headers.status === 'accepted') {
+          onSuccess();
+        } else {
+          onFail();
         }
-      };
-
-      source.onerror = () => {
-        source.close();
-        alert("Ошибка получения обновления. Повторите попытку.");
-        restart();
-      };
+      }).catch(err => {
+        document.getElementById('error-box').innerText = 'Ошибка: ' + err;
+        onFail();
+      });
     }
 
     window.onload = () => {
